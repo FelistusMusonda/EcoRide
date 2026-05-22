@@ -32,17 +32,6 @@ public class LoginActivity extends AppCompatActivity {
         databaseHelper = new DatabaseHelper(this);
         sharedPreferences = getSharedPreferences("EcoRide", MODE_PRIVATE);
 
-        if (sharedPreferences.getBoolean("isLoggedIn", false)) {
-            // Check if logged in user is admin
-            if (sharedPreferences.getBoolean("isAdmin", false)) {
-                startActivity(new Intent(LoginActivity.this, AdminActivity.class));
-            } else {
-                startActivity(new Intent(LoginActivity.this, MainActivity.class));
-            }
-            finish();
-            return;
-        }
-
         btnLogin.setOnClickListener(v -> loginUser());
         btnSignup.setOnClickListener(v -> {
             startActivity(new Intent(LoginActivity.this, RegisterActivity.class));
@@ -53,9 +42,11 @@ public class LoginActivity extends AppCompatActivity {
             editor.putBoolean("isLoggedIn", true);
             editor.putString("userName", "Guest");
             editor.putString("userEmail", "guest@ecoride.com");
-            editor.putString("currentUserEmail", "guest@ecoride.com");
             editor.putBoolean("isGuest", true);
             editor.putBoolean("isAdmin", false);
+            editor.putInt("userId", -1);
+            editor.putFloat("total_carbon", 0);
+            editor.putInt("total_trips", 0);
             editor.apply();
 
             startActivity(new Intent(LoginActivity.this, MainActivity.class));
@@ -77,40 +68,32 @@ public class LoginActivity extends AppCompatActivity {
             return;
         }
 
-        // Check login result: 1=admin, 2=regular user, 0=failed
-        int loginResult = databaseHelper.loginUser(email, password);
+        DatabaseHelper.User user = databaseHelper.loginUser(email, password);
 
-        if (loginResult == 1) { // Admin login
-            String userName = databaseHelper.getUserName(email);
-
+        if (user != null) {
             SharedPreferences.Editor editor = sharedPreferences.edit();
             editor.putBoolean("isLoggedIn", true);
             editor.putString("currentUserEmail", email);
-            editor.putString("userName", userName);
+            editor.putString("userName", user.name);
             editor.putString("userEmail", email);
+            editor.putInt("userId", user.id);
             editor.putBoolean("isGuest", false);
-            editor.putBoolean("isAdmin", true);
-            editor.apply();
 
-            Toast.makeText(this, "Admin login successful! Welcome " + userName + "!", Toast.LENGTH_SHORT).show();
+            // IMPORTANT: Load user's stats from database
+            editor.putFloat("total_carbon", (float) user.totalCarbon);
+            editor.putInt("total_trips", user.totalTrips);
 
-            startActivity(new Intent(LoginActivity.this, AdminActivity.class));
-            finish();
-        } else if (loginResult == 2) { // Regular user login
-            String userName = databaseHelper.getUserName(email);
-
-            SharedPreferences.Editor editor = sharedPreferences.edit();
-            editor.putBoolean("isLoggedIn", true);
-            editor.putString("currentUserEmail", email);
-            editor.putString("userName", userName);
-            editor.putString("userEmail", email);
-            editor.putBoolean("isGuest", false);
-            editor.putBoolean("isAdmin", false);
-            editor.apply();
-
-            Toast.makeText(this, "Welcome back " + userName + "!", Toast.LENGTH_SHORT).show();
-
-            startActivity(new Intent(LoginActivity.this, MainActivity.class));
+            if (user.role != null && user.role.equals("admin")) {
+                editor.putBoolean("isAdmin", true);
+                editor.apply();
+                Toast.makeText(this, "Admin login successful! Welcome " + user.name + "!", Toast.LENGTH_SHORT).show();
+                startActivity(new Intent(LoginActivity.this, AdminActivity.class));
+            } else {
+                editor.putBoolean("isAdmin", false);
+                editor.apply();
+                Toast.makeText(this, "Welcome back " + user.name + "!", Toast.LENGTH_SHORT).show();
+                startActivity(new Intent(LoginActivity.this, MainActivity.class));
+            }
             finish();
         } else {
             Toast.makeText(this, "Invalid email or password.", Toast.LENGTH_LONG).show();
