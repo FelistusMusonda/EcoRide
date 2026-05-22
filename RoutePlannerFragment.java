@@ -169,6 +169,7 @@ public class RoutePlannerFragment extends Fragment {
     private SwitchCompat switchRoundTrip;
     private String selectedMode = "walking";
     private SharedPreferences prefs;
+    private DatabaseHelper databaseHelper;
 
     private double fromLat = 0, fromLon = 0;
     private double toLat = 0, toLon = 0;
@@ -191,6 +192,7 @@ public class RoutePlannerFragment extends Fragment {
         switchRoundTrip = view.findViewById(R.id.switch_round_trip);
 
         prefs = requireContext().getSharedPreferences("EcoRide", 0);
+        databaseHelper = new DatabaseHelper(requireContext());
 
         List<String> locationList = new ArrayList<>(ALL_LOCATIONS);
 
@@ -273,9 +275,43 @@ public class RoutePlannerFragment extends Fragment {
         int durationMinutes = calculateTime(totalDistance, selectedMode);
         double carbonSaved = calculateCarbonSaved(totalDistance, selectedMode);
 
+        // Save to BOTH database and SharedPreferences
+        saveTripToDatabase(totalDistance, carbonSaved, isRoundTrip);
         saveTripData(totalDistance, carbonSaved, isRoundTrip);
 
         showPopup(fromAddress, toAddress, totalDistance, durationMinutes, carbonSaved, isRoundTrip, oneWayDistance);
+    }
+
+    // NEW METHOD: Save trip to database
+    private void saveTripToDatabase(double distance, double carbon, boolean isRoundTrip) {
+        int userId = prefs.getInt("userId", -1);
+        String userName = prefs.getString("userName", "User");
+
+        if (userId != -1) {
+            String modeName = getModeName();
+            String tripType = isRoundTrip ? "Round Trip" : "One Way";
+            String modeWithType = modeName + " (" + tripType + ")";
+
+            boolean success = databaseHelper.saveTrip(
+                    userId,
+                    userName,
+                    fromAddress,
+                    toAddress,
+                    modeWithType,
+                    distance,
+                    carbon
+            );
+
+            if (success) {
+                // Update user stats in database
+                databaseHelper.updateUserStats(userId, carbon, isRoundTrip ? 2 : 1);
+                Toast.makeText(getContext(), "Trip saved to database!", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(getContext(), "Failed to save trip to database", Toast.LENGTH_SHORT).show();
+            }
+        } else {
+            Toast.makeText(getContext(), "Login to save trips permanently", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void showPopup(String from, String to, double totalDistance, int durationMinutes, double carbonSaved, boolean isRoundTrip, double oneWayDistance) {
@@ -291,7 +327,6 @@ public class RoutePlannerFragment extends Fragment {
         String modeName = getModeName();
         String tripType = isRoundTrip ? "Round Trip" : "One Way";
 
-        // Clean distance display - just total distance
         String displayDistance = String.format("%.1f km", totalDistance);
 
         Dialog dialog = new Dialog(requireContext());
@@ -319,7 +354,7 @@ public class RoutePlannerFragment extends Fragment {
         tvMode.setText(modeName + " - " + tripType);
         tvDistance.setText(displayDistance);
         tvTime.setText(timeString);
-        tvCarbon.setText(String.format("%.2f", carbonSaved));
+        tvCarbon.setText(String.format("%.2f kg", carbonSaved));
 
         btnMinimize.setOnClickListener(v -> dialog.dismiss());
 
@@ -397,8 +432,6 @@ public class RoutePlannerFragment extends Fragment {
                 .putFloat("total_carbon", totalCarbon + (float) carbon)
                 .putInt("total_trips", totalTrips + (isRoundTrip ? 2 : 1))
                 .apply();
-
-        Toast.makeText(getContext(), "Trip saved!", Toast.LENGTH_SHORT).show();
     }
 
     private double calculateDistance(double lat1, double lon1, double lat2, double lon2) {
