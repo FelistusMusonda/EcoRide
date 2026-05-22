@@ -11,11 +11,10 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
 import com.google.android.material.bottomnavigation.BottomNavigationView;
-import java.util.Calendar;
 
 public class HomeFragment extends Fragment {
 
-    private TextView tvCarbonSaved, tvTripsCount, tvTrees, tvUserName, tvEcoTip, tvGreeting;
+    private TextView tvCarbonSaved, tvTripsCount, tvTrees, tvUserName, tvEcoTip;
     private LinearLayout btnPlanRoute, btnViewStats, recentActivityContainer;
     private SharedPreferences prefs;
 
@@ -24,7 +23,6 @@ public class HomeFragment extends Fragment {
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
         View view = inflater.inflate(R.layout.fragment_home, container, false);
 
-        tvGreeting = view.findViewById(R.id.tv_greeting);
         tvCarbonSaved = view.findViewById(R.id.tv_carbon_saved);
         tvTripsCount = view.findViewById(R.id.tv_trips_count);
         tvTrees = view.findViewById(R.id.tv_trees);
@@ -38,9 +36,6 @@ public class HomeFragment extends Fragment {
 
         String userName = prefs.getString("userName", "Guest");
         tvUserName.setText(userName);
-
-        // Set dynamic greeting based on real time
-        setDynamicGreeting();
 
         loadStats();
         loadRecentTrips();
@@ -69,26 +64,6 @@ public class HomeFragment extends Fragment {
         });
 
         return view;
-    }
-
-    private void setDynamicGreeting() {
-        Calendar calendar = Calendar.getInstance();
-        int hourOfDay = calendar.get(Calendar.HOUR_OF_DAY);
-
-        String greeting;
-        if (hourOfDay >= 5 && hourOfDay < 12) {
-            greeting = "Good morning";
-        } else if (hourOfDay >= 12 && hourOfDay < 17) {
-            greeting = "Good afternoon";
-        } else if (hourOfDay >= 17 && hourOfDay < 22) {
-            greeting = "Good evening";
-        } else {
-            greeting = "Hello";  // Changed from "Good night" to "Hello"
-        }
-
-        if (tvGreeting != null) {
-            tvGreeting.setText(greeting);
-        }
     }
 
     private void loadStats() {
@@ -156,12 +131,32 @@ public class HomeFragment extends Fragment {
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
+        // Mode icon circle
+        LinearLayout iconCircle = new LinearLayout(getContext());
+        iconCircle.setLayoutParams(new LinearLayout.LayoutParams(48, 48));
+        iconCircle.setGravity(android.view.Gravity.CENTER);
+
+        // Set icon based on mode
+        TextView iconText = new TextView(getContext());
+        if (mode.contains("Walking")) {
+            iconCircle.setBackgroundResource(R.drawable.circle_bg_walking);
+            iconText.setText("🚶");
+        } else if (mode.contains("Cycling")) {
+            iconCircle.setBackgroundResource(R.drawable.circle_bg_cycling);
+            iconText.setText("🚲");
+        } else {
+            iconCircle.setBackgroundResource(R.drawable.circle_bg_bus);
+            iconText.setText("🚌");
+        }
+        iconText.setTextSize(20);
+        iconCircle.addView(iconText);
+
         // Trip details
         LinearLayout detailsLayout = new LinearLayout(getContext());
         detailsLayout.setOrientation(LinearLayout.VERTICAL);
         detailsLayout.setLayoutParams(new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-        detailsLayout.setPadding(0, 0, 0, 0);
+        detailsLayout.setPadding(12, 0, 0, 0);
 
         TextView routeText = new TextView(getContext());
         routeText.setText(from + " → " + to);
@@ -185,6 +180,7 @@ public class HomeFragment extends Fragment {
         distanceText.setTextColor(0xFF0D47A1);
         distanceText.setTypeface(null, android.graphics.Typeface.BOLD);
 
+        itemLayout.addView(iconCircle);
         itemLayout.addView(detailsLayout);
         itemLayout.addView(distanceText);
 
@@ -194,7 +190,6 @@ public class HomeFragment extends Fragment {
     @Override
     public void onResume() {
         super.onResume();
-        setDynamicGreeting();
         loadStats();
         loadRecentTrips();
     }
