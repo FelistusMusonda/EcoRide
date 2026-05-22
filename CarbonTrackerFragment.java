@@ -1,6 +1,5 @@
 package com.example.ecoride;
 
-import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -11,6 +10,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
 import com.google.android.material.bottomnavigation.BottomNavigationView;
+import java.util.List;
 
 public class CarbonTrackerFragment extends Fragment {
 
@@ -18,7 +18,9 @@ public class CarbonTrackerFragment extends Fragment {
     private TextView tvWalkingCount, tvWalkingDistance, tvWalkingCarbon;
     private TextView tvCyclingCount, tvCyclingDistance, tvCyclingCarbon;
     private TextView tvBusCount, tvBusDistance, tvBusCarbon;
-    private SharedPreferences prefs;
+    private DatabaseHelper databaseHelper;
+    private int currentUserId;
+    private android.content.SharedPreferences prefs;
 
     @Nullable
     @Override
@@ -55,13 +57,87 @@ public class CarbonTrackerFragment extends Fragment {
         tvBusDistance = view.findViewById(R.id.tv_bus_distance);
         tvBusCarbon = view.findViewById(R.id.tv_bus_carbon);
 
+        databaseHelper = new DatabaseHelper(requireContext());
         prefs = requireContext().getSharedPreferences("EcoRide", 0);
+
+        // Get current user ID - using correct key "userId"
+        currentUserId = prefs.getInt("userId", -1);
+
         loadStats();
 
         return view;
     }
 
     private void loadStats() {
+        if (currentUserId != -1) {
+            loadStatsFromDatabase();
+        } else {
+            loadStatsFromSharedPreferences();
+        }
+    }
+
+    private void loadStatsFromDatabase() {
+        // Get user from database
+        DatabaseHelper.User user = databaseHelper.getUserById(currentUserId);
+
+        if (user != null) {
+            // Summary stats
+            double totalCarbon = user.totalCarbon;
+            int totalTrips = user.totalTrips;
+            double trees = totalCarbon / 22;
+
+            tvTotalCarbon.setText(String.format("%.1f", totalCarbon));
+            tvTrees.setText(String.format("%.1f", trees));
+            tvTotalTrips.setText(String.valueOf(totalTrips));
+
+            // Get trips from database to calculate mode-specific stats
+            List<DatabaseHelper.Trip> trips = databaseHelper.getUserTrips(currentUserId);
+
+            int walkingCount = 0;
+            int cyclingCount = 0;
+            int busCount = 0;
+            double walkingDistance = 0;
+            double cyclingDistance = 0;
+            double busDistance = 0;
+            double walkingCarbon = 0;
+            double cyclingCarbon = 0;
+            double busCarbon = 0;
+
+            for (DatabaseHelper.Trip trip : trips) {
+                String modeLower = trip.mode.toLowerCase();
+
+                if (modeLower.contains("walking")) {
+                    walkingCount++;
+                    walkingDistance += trip.distance;
+                    walkingCarbon += trip.carbonSaved;
+                } else if (modeLower.contains("cycling")) {
+                    cyclingCount++;
+                    cyclingDistance += trip.distance;
+                    cyclingCarbon += trip.carbonSaved;
+                } else if (modeLower.contains("bus")) {
+                    busCount++;
+                    busDistance += trip.distance;
+                    busCarbon += trip.carbonSaved;
+                }
+            }
+
+            tvWalkingCount.setText(String.valueOf(walkingCount));
+            tvWalkingDistance.setText(String.format("%.1f km", walkingDistance));
+            tvWalkingCarbon.setText(String.format("%.1f kg", walkingCarbon));
+
+            tvCyclingCount.setText(String.valueOf(cyclingCount));
+            tvCyclingDistance.setText(String.format("%.1f km", cyclingDistance));
+            tvCyclingCarbon.setText(String.format("%.1f kg", cyclingCarbon));
+
+            tvBusCount.setText(String.valueOf(busCount));
+            tvBusDistance.setText(String.format("%.1f km", busDistance));
+            tvBusCarbon.setText(String.format("%.1f kg", busCarbon));
+        } else {
+            loadStatsFromSharedPreferences();
+        }
+    }
+
+    private void loadStatsFromSharedPreferences() {
         // Summary stats
         float totalCarbon = prefs.getFloat("total_carbon", 0);
         float totalDistance = prefs.getFloat("total_distance", 0);
