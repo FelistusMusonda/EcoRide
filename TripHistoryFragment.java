@@ -22,6 +22,8 @@ public class TripHistoryFragment extends Fragment {
     private TextView tvWalkingCarbon, tvCyclingCarbon, tvPublicCarbon;
     private RecyclerView rvRecentTrips;
     private SharedPreferences prefs;
+    private DatabaseHelper databaseHelper;
+    private int currentUserId;
     private TripAdapter tripAdapter;
     private List<Trip> allTrips = new ArrayList<>();
 
@@ -49,6 +51,8 @@ public class TripHistoryFragment extends Fragment {
         rvRecentTrips = view.findViewById(R.id.rv_recent_trips);
 
         prefs = requireContext().getSharedPreferences("EcoRide", 0);
+        databaseHelper = new DatabaseHelper(requireContext());
+        currentUserId = prefs.getInt("userId", -1);
 
         loadTripHistory();
         setupRecyclerView();
@@ -57,6 +61,11 @@ public class TripHistoryFragment extends Fragment {
     }
 
     private void loadTripHistory() {
+        if (currentUserId != -1) {
+            loadTripHistoryFromDatabase();
+            return;
+        }
+
         int totalTrips = prefs.getInt("total_trips", 0);
         float totalDistance = prefs.getFloat("total_distance", 0);
         float totalCarbon = prefs.getFloat("total_carbon", 0);
@@ -92,6 +101,74 @@ public class TripHistoryFragment extends Fragment {
         loadRecentTrips();
     }
 
+    private void loadTripHistoryFromDatabase() {
+        allTrips.clear();
+
+        List<DatabaseHelper.Trip> dbTrips = databaseHelper.getUserTrips(currentUserId);
+
+        int totalTrips = 0;
+        double totalDistance = 0;
+        double totalCarbon = 0;
+
+        int walkingCount = 0;
+        int cyclingCount = 0;
+        int publicCount = 0;
+
+        double walkingDistance = 0;
+        double cyclingDistance = 0;
+        double publicDistance = 0;
+
+        double walkingCarbon = 0;
+        double cyclingCarbon = 0;
+        double publicCarbon = 0;
+
+        for (DatabaseHelper.Trip dbTrip : dbTrips) {
+            Trip trip = new Trip(dbTrip.from, dbTrip.to, dbTrip.mode, dbTrip.distance, dbTrip.carbonSaved);
+            allTrips.add(trip);
+
+            int tripCount = getTripCountFromMode(dbTrip.mode);
+            String modeLower = dbTrip.mode == null ? "" : dbTrip.mode.toLowerCase();
+
+            totalTrips += tripCount;
+            totalDistance += dbTrip.distance;
+            totalCarbon += dbTrip.carbonSaved;
+
+            if (modeLower.contains("walking")) {
+                walkingCount += tripCount;
+                walkingDistance += dbTrip.distance;
+                walkingCarbon += dbTrip.carbonSaved;
+            } else if (modeLower.contains("cycling")) {
+                cyclingCount += tripCount;
+                cyclingDistance += dbTrip.distance;
+                cyclingCarbon += dbTrip.carbonSaved;
+            } else if (modeLower.contains("bus")) {
+                publicCount += tripCount;
+                publicDistance += dbTrip.distance;
+                publicCarbon += dbTrip.carbonSaved;
+            }
+        }
+
+        tvTotalTrips.setText(String.valueOf(totalTrips));
+        tvTotalDistance.setText(String.format("%.1f km", totalDistance));
+        tvTotalCarbon.setText(String.format("%.1f kg", totalCarbon));
+
+        tvWalkingCount.setText(String.valueOf(walkingCount));
+        tvCyclingCount.setText(String.valueOf(cyclingCount));
+        tvPublicCount.setText(String.valueOf(publicCount));
+
+        tvWalkingDistance.setText(String.format("%.1f km", walkingDistance));
+        tvCyclingDistance.setText(String.format("%.1f km", cyclingDistance));
+        tvPublicDistance.setText(String.format("%.1f km", publicDistance));
+
+        tvWalkingCarbon.setText(String.format("%.1f kg", walkingCarbon));
+        tvCyclingCarbon.setText(String.format("%.1f kg", cyclingCarbon));
+        tvPublicCarbon.setText(String.format("%.1f kg", publicCarbon));
+
+        if (tripAdapter != null) {
+            tripAdapter.updateTrips(allTrips);
+        }
+    }
+
     private void loadRecentTrips() {
         allTrips.clear();
 
@@ -101,14 +178,17 @@ public class TripHistoryFragment extends Fragment {
             for (int i = trips.length - 1; i >= 0; i--) {
                 String[] parts = trips[i].split("\\|");
                 if (parts.length >= 5) {
-                    String from = parts[0];
-                    String to = parts[1];
-                    String mode = parts[2];
-                    double distance = Double.parseDouble(parts[3]);
-                    double carbon = Double.parseDouble(parts[4]);
+                    try {
+                        String from = parts[0];
+                        String to = parts[1];
+                        String mode = parts[2];
+                        double distance = Double.parseDouble(parts[3]);
+                        double carbon = Double.parseDouble(parts[4]);
 
-                    Trip trip = new Trip(from, to, mode, distance, carbon);
-                    allTrips.add(trip);
+                        Trip trip = new Trip(from, to, mode, distance, carbon);
+                        allTrips.add(trip);
+                    } catch (NumberFormatException ignored) {
+                    }
                 }
             }
         }
@@ -127,7 +207,12 @@ public class TripHistoryFragment extends Fragment {
     @Override
     public void onResume() {
         super.onResume();
+        currentUserId = prefs.getInt("userId", -1);
         loadTripHistory();
+    }
+
+    private int getTripCountFromMode(String mode) {
+        return mode != null && mode.toLowerCase().contains("round trip") ? 2 : 1;
     }
 
     static class Trip {

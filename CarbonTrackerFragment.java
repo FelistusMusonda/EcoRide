@@ -81,18 +81,12 @@ public class CarbonTrackerFragment extends Fragment {
         DatabaseHelper.User user = databaseHelper.getUserById(currentUserId);
 
         if (user != null) {
-            // Summary stats
-            double totalCarbon = user.totalCarbon;
-            int totalTrips = user.totalTrips;
-            double trees = totalCarbon / 22;
-
-            tvTotalCarbon.setText(String.format("%.1f", totalCarbon));
-            tvTrees.setText(String.format("%.1f", trees));
-            tvTotalTrips.setText(String.valueOf(totalTrips));
-
             // Get trips from database to calculate mode-specific stats
             List<DatabaseHelper.Trip> trips = databaseHelper.getUserTrips(currentUserId);
 
+            int totalTrips = 0;
+            double totalDistance = 0;
+            double totalCarbon = 0;
             int walkingCount = 0;
             int cyclingCount = 0;
             int busCount = 0;
@@ -104,22 +98,32 @@ public class CarbonTrackerFragment extends Fragment {
             double busCarbon = 0;
 
             for (DatabaseHelper.Trip trip : trips) {
-                String modeLower = trip.mode.toLowerCase();
+                String modeLower = trip.mode == null ? "" : trip.mode.toLowerCase();
+                int tripCount = getTripCountFromMode(trip.mode);
+                totalTrips += tripCount;
+                totalDistance += trip.distance;
+                totalCarbon += trip.carbonSaved;
 
                 if (modeLower.contains("walking")) {
-                    walkingCount++;
+                    walkingCount += tripCount;
                     walkingDistance += trip.distance;
                     walkingCarbon += trip.carbonSaved;
                 } else if (modeLower.contains("cycling")) {
-                    cyclingCount++;
+                    cyclingCount += tripCount;
                     cyclingDistance += trip.distance;
                     cyclingCarbon += trip.carbonSaved;
                 } else if (modeLower.contains("bus")) {
-                    busCount++;
+                    busCount += tripCount;
                     busDistance += trip.distance;
                     busCarbon += trip.carbonSaved;
                 }
             }
+
+            double trees = totalCarbon / 22;
+            tvTotalCarbon.setText(String.format("%.1f", totalCarbon));
+            tvTrees.setText(String.format("%.1f", trees));
+            tvTotalTrips.setText(String.valueOf(totalTrips));
+            tvTotalDistance.setText(String.format("%.1f", totalDistance));
 
             tvWalkingCount.setText(String.valueOf(walkingCount));
             tvWalkingDistance.setText(String.format("%.1f km", walkingDistance));
@@ -135,6 +139,10 @@ public class CarbonTrackerFragment extends Fragment {
         } else {
             loadStatsFromSharedPreferences();
         }
+    }
+
+    private int getTripCountFromMode(String mode) {
+        return mode != null && mode.toLowerCase().contains("round trip") ? 2 : 1;
     }
 
     private void loadStatsFromSharedPreferences() {

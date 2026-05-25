@@ -1,7 +1,9 @@
 package com.example.ecoride;
 
 import android.content.SharedPreferences;
+import android.graphics.Typeface;
 import android.os.Bundle;
+import android.text.TextUtils;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -11,10 +13,23 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
 import com.google.android.material.bottomnavigation.BottomNavigationView;
+import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.List;
+import java.util.Locale;
 
 public class HomeFragment extends Fragment {
 
-    private TextView tvCarbonSaved, tvTripsCount, tvTrees, tvUserName, tvEcoTip;
+    private static final int MAX_RECENT_TRIPS = 3;
+    private static final String[] ECO_TIPS = {
+            "Walking 1 km instead of driving saves about 0.19 kg of CO2.",
+            "Cycling a short commute can save fuel, parking time, and daily emissions.",
+            "Taking the bus can cut route emissions sharply compared with driving alone.",
+            "Combining errands into one trip reduces avoidable distance.",
+            "Carpooling shares the same journey impact across more people."
+    };
+
+    private TextView tvCarbonSaved, tvTripsCount, tvTrees, tvUserName, tvEcoTip, tvGreeting, tvRecentSummary;
     private LinearLayout btnPlanRoute, btnViewStats, recentActivityContainer;
     private SharedPreferences prefs;
 
@@ -28,42 +43,59 @@ public class HomeFragment extends Fragment {
         tvTrees = view.findViewById(R.id.tv_trees);
         tvUserName = view.findViewById(R.id.tv_user_name);
         tvEcoTip = view.findViewById(R.id.tv_eco_tip);
+        tvGreeting = view.findViewById(R.id.tv_greeting);
+        tvRecentSummary = view.findViewById(R.id.tv_recent_summary);
         btnPlanRoute = view.findViewById(R.id.btn_plan_route);
         btnViewStats = view.findViewById(R.id.btn_view_stats);
         recentActivityContainer = view.findViewById(R.id.recent_activity_container);
 
         prefs = requireContext().getSharedPreferences("EcoRide", 0);
 
-        String userName = prefs.getString("userName", "Guest");
-        tvUserName.setText(userName);
-
+        loadHeader();
         loadStats();
         loadRecentTrips();
+        loadDailyTip();
 
-        String[] tips = {
-                "Walking 1 km instead of driving saves 0.19 kg of CO2",
-                "Cycling 5 km to work saves 1 kg of CO2 per day",
-                "Taking the bus reduces emissions by 75% compared to driving",
-                "One bus can take 40 cars off the road",
-                "Carpooling cuts your carbon footprint in half"
-        };
-        tvEcoTip.setText(tips[(int)(Math.random() * tips.length)]);
-
-        btnPlanRoute.setOnClickListener(v -> {
-            if (getActivity() != null) {
-                BottomNavigationView bottomNav = getActivity().findViewById(R.id.bottom_navigation);
-                bottomNav.setSelectedItemId(R.id.navigation_route);
-            }
-        });
-
-        btnViewStats.setOnClickListener(v -> {
-            if (getActivity() != null) {
-                BottomNavigationView bottomNav = getActivity().findViewById(R.id.bottom_navigation);
-                bottomNav.setSelectedItemId(R.id.navigation_carbon);
-            }
-        });
+        btnPlanRoute.setOnClickListener(v -> selectBottomNavItem(R.id.navigation_route));
+        btnViewStats.setOnClickListener(v -> selectBottomNavItem(R.id.navigation_carbon));
 
         return view;
+    }
+
+    private void loadHeader() {
+        String userName = prefs.getString("userName", "Guest");
+        if (TextUtils.isEmpty(userName)) {
+            userName = "Guest";
+        }
+
+        tvUserName.setText(userName);
+        tvGreeting.setText(getGreeting());
+    }
+
+    private String getGreeting() {
+        int hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
+        if (hour < 12) {
+            return "Good morning,";
+        } else if (hour < 17) {
+            return "Good afternoon,";
+        }
+        return "Good evening,";
+    }
+
+    private void loadDailyTip() {
+        int dayOfYear = Calendar.getInstance().get(Calendar.DAY_OF_YEAR);
+        tvEcoTip.setText(ECO_TIPS[dayOfYear % ECO_TIPS.length]);
+    }
+
+    private void selectBottomNavItem(int itemId) {
+        if (getActivity() == null) {
+            return;
+        }
+
+        BottomNavigationView bottomNav = getActivity().findViewById(R.id.bottom_navigation);
+        if (bottomNav != null) {
+            bottomNav.setSelectedItemId(itemId);
+        }
     }
 
     private void loadStats() {
@@ -71,114 +103,156 @@ public class HomeFragment extends Fragment {
         int trips = prefs.getInt("total_trips", 0);
         double trees = carbon / 22;
 
-        tvCarbonSaved.setText(String.format("%.1f", carbon));
+        tvCarbonSaved.setText(String.format(Locale.US, "%.1f", carbon));
         tvTripsCount.setText(String.valueOf(trips));
-        tvTrees.setText(String.format("%.1f", trees));
+        tvTrees.setText(String.format(Locale.US, "%.1f", trees));
     }
 
     private void loadRecentTrips() {
-        // Clear existing views
         recentActivityContainer.removeAllViews();
 
-        String tripsData = prefs.getString("recent_trips", "");
-        if (!tripsData.isEmpty()) {
-            String[] trips = tripsData.split("\\|\\|");
-            int count = 0;
+        List<RecentTrip> recentTrips = getRecentTrips();
+        tvRecentSummary.setText(getRecentSummary(recentTrips.size()));
 
-            // Show last 3 trips
-            for (int i = trips.length - 1; i >= 0 && count < 3; i--) {
-                String[] parts = trips[i].split("\\|");
-                if (parts.length >= 5) {
-                    String from = parts[0];
-                    String to = parts[1];
-                    String mode = parts[2];
-                    double distance = Double.parseDouble(parts[3]);
+        for (int i = 0; i < recentTrips.size(); i++) {
+            recentActivityContainer.addView(createTripItem(recentTrips.get(i)));
 
-                    // Create trip item view
-                    LinearLayout tripItem = createTripItem(from, to, mode, distance);
-                    recentActivityContainer.addView(tripItem);
-
-                    // Add divider if not last
-                    if (count < 2 && i > 0) {
-                        View divider = new View(getContext());
-                        divider.setLayoutParams(new LinearLayout.LayoutParams(
-                                LinearLayout.LayoutParams.MATCH_PARENT, 1));
-                        divider.setBackgroundColor(0xFFEEEEEE);
-                        recentActivityContainer.addView(divider);
-                    }
-                    count++;
-                }
+            if (i < recentTrips.size() - 1) {
+                View divider = new View(requireContext());
+                divider.setLayoutParams(new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, dp(1)));
+                divider.setBackgroundColor(0xFFEEEEEE);
+                recentActivityContainer.addView(divider);
             }
         }
 
-        // If no trips, show empty message
         if (recentActivityContainer.getChildCount() == 0) {
-            TextView emptyText = new TextView(getContext());
-            emptyText.setText("No trips yet.\nPlan your first eco-friendly trip!");
+            TextView emptyText = new TextView(requireContext());
+            emptyText.setText("No trips yet. Plan your first eco-friendly trip.");
             emptyText.setTextSize(14);
             emptyText.setTextColor(0xFF666666);
-            emptyText.setPadding(16, 16, 16, 16);
+            emptyText.setPadding(dp(16), dp(18), dp(16), dp(18));
             emptyText.setGravity(android.view.Gravity.CENTER);
+            emptyText.setBackgroundResource(R.drawable.recent_empty_bg);
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+            params.setMargins(dp(8), dp(8), dp(8), dp(8));
+            emptyText.setLayoutParams(params);
             recentActivityContainer.addView(emptyText);
         }
     }
 
-    private LinearLayout createTripItem(String from, String to, String mode, double distance) {
-        LinearLayout itemLayout = new LinearLayout(getContext());
+    private String getRecentSummary(int count) {
+        if (count == 0) {
+            return "No trips";
+        }
+        if (count == 1) {
+            return "Latest trip";
+        }
+        return count + " latest trips";
+    }
+
+    private List<RecentTrip> getRecentTrips() {
+        List<RecentTrip> recentTrips = new ArrayList<>();
+        String tripsData = prefs.getString("recent_trips", "");
+        if (TextUtils.isEmpty(tripsData)) {
+            return recentTrips;
+        }
+
+        String[] trips = tripsData.split("\\|\\|");
+        for (int i = trips.length - 1; i >= 0 && recentTrips.size() < MAX_RECENT_TRIPS; i--) {
+            RecentTrip trip = parseTrip(trips[i]);
+            if (trip != null) {
+                recentTrips.add(trip);
+            }
+        }
+        return recentTrips;
+    }
+
+    @Nullable
+    private RecentTrip parseTrip(String tripRecord) {
+        if (TextUtils.isEmpty(tripRecord)) {
+            return null;
+        }
+
+        String[] parts = tripRecord.split("\\|");
+        if (parts.length < 5) {
+            return null;
+        }
+
+        try {
+            return new RecentTrip(
+                    parts[0].trim(),
+                    parts[1].trim(),
+                    parts[2].trim(),
+                    Double.parseDouble(parts[3]),
+                    Double.parseDouble(parts[4])
+            );
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private LinearLayout createTripItem(RecentTrip trip) {
+        LinearLayout itemLayout = new LinearLayout(requireContext());
         itemLayout.setOrientation(LinearLayout.HORIZONTAL);
-        itemLayout.setPadding(16, 16, 16, 16);
+        itemLayout.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        itemLayout.setPadding(dp(16), dp(14), dp(16), dp(14));
         itemLayout.setLayoutParams(new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
-        // Mode icon circle
-        LinearLayout iconCircle = new LinearLayout(getContext());
-        iconCircle.setLayoutParams(new LinearLayout.LayoutParams(48, 48));
+        LinearLayout iconCircle = new LinearLayout(requireContext());
+        iconCircle.setLayoutParams(new LinearLayout.LayoutParams(dp(48), dp(48)));
         iconCircle.setGravity(android.view.Gravity.CENTER);
 
-        // Set icon based on mode
-        TextView iconText = new TextView(getContext());
-        if (mode.contains("Walking")) {
+        TextView iconText = new TextView(requireContext());
+        if (trip.mode.contains("Walking")) {
             iconCircle.setBackgroundResource(R.drawable.circle_bg_walking);
-            iconText.setText("🚶");
-        } else if (mode.contains("Cycling")) {
+            iconText.setText("W");
+        } else if (trip.mode.contains("Cycling")) {
             iconCircle.setBackgroundResource(R.drawable.circle_bg_cycling);
-            iconText.setText("🚲");
+            iconText.setText("C");
         } else {
             iconCircle.setBackgroundResource(R.drawable.circle_bg_bus);
-            iconText.setText("🚌");
+            iconText.setText("B");
         }
         iconText.setTextSize(20);
+        iconText.setTextColor(0xFFFFFFFF);
+        iconText.setTypeface(null, Typeface.BOLD);
         iconCircle.addView(iconText);
 
-        // Trip details
-        LinearLayout detailsLayout = new LinearLayout(getContext());
+        LinearLayout detailsLayout = new LinearLayout(requireContext());
         detailsLayout.setOrientation(LinearLayout.VERTICAL);
         detailsLayout.setLayoutParams(new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-        detailsLayout.setPadding(12, 0, 0, 0);
+        detailsLayout.setPadding(dp(12), 0, dp(12), 0);
 
-        TextView routeText = new TextView(getContext());
-        routeText.setText(from + " → " + to);
+        TextView routeText = new TextView(requireContext());
+        routeText.setText(trip.from + " -> " + trip.to);
         routeText.setTextSize(14);
         routeText.setTextColor(0xFF1A1A2E);
-        routeText.setTypeface(null, android.graphics.Typeface.BOLD);
+        routeText.setTypeface(null, Typeface.BOLD);
+        routeText.setSingleLine(true);
+        routeText.setEllipsize(TextUtils.TruncateAt.END);
 
-        TextView infoText = new TextView(getContext());
-        infoText.setText(mode + " • " + String.format("%.1f", distance) + " km");
+        TextView infoText = new TextView(requireContext());
+        infoText.setText(String.format(Locale.US, "%s - %.1f kg CO2 saved", trip.mode, trip.carbon));
         infoText.setTextSize(12);
         infoText.setTextColor(0xFF666666);
         infoText.setPadding(0, 4, 0, 0);
+        infoText.setSingleLine(true);
+        infoText.setEllipsize(TextUtils.TruncateAt.END);
 
         detailsLayout.addView(routeText);
         detailsLayout.addView(infoText);
 
-        // Distance
-        TextView distanceText = new TextView(getContext());
-        distanceText.setText(String.format("%.1f", distance) + " km");
+        TextView distanceText = new TextView(requireContext());
+        distanceText.setText(String.format(Locale.US, "%.1f km", trip.distance));
         distanceText.setTextSize(14);
         distanceText.setTextColor(0xFF0D47A1);
-        distanceText.setTypeface(null, android.graphics.Typeface.BOLD);
+        distanceText.setTypeface(null, Typeface.BOLD);
 
         itemLayout.addView(iconCircle);
         itemLayout.addView(detailsLayout);
@@ -187,10 +261,33 @@ public class HomeFragment extends Fragment {
         return itemLayout;
     }
 
+    private int dp(int value) {
+        return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
+    }
+
     @Override
     public void onResume() {
         super.onResume();
-        loadStats();
-        loadRecentTrips();
+        if (prefs != null && recentActivityContainer != null) {
+            loadHeader();
+            loadStats();
+            loadRecentTrips();
+        }
+    }
+
+    private static class RecentTrip {
+        final String from;
+        final String to;
+        final String mode;
+        final double distance;
+        final double carbon;
+
+        RecentTrip(String from, String to, String mode, double distance, double carbon) {
+            this.from = from;
+            this.to = to;
+            this.mode = mode;
+            this.distance = distance;
+            this.carbon = carbon;
+        }
     }
 }

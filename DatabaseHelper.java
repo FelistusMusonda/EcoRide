@@ -12,7 +12,7 @@ import java.util.List;
 public class DatabaseHelper extends SQLiteOpenHelper {
 
     private static final String DATABASE_NAME = "EcoRide.db";
-    private static final int DATABASE_VERSION = 3;
+    private static final int DATABASE_VERSION = 4;
 
     // Users table
     private static final String TABLE_USERS = "users";
@@ -35,6 +35,13 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     private static final String COL_TRIP_DISTANCE = "distance";
     private static final String COL_TRIP_CARBON = "carbon_saved";
     private static final String COL_TRIP_DATE = "trip_date";
+
+    // Locations table
+    private static final String TABLE_LOCATIONS = "locations";
+    private static final String COL_LOCATION_ID = "location_id";
+    private static final String COL_LOCATION_NAME = "name";
+    private static final String COL_LOCATION_LAT = "latitude";
+    private static final String COL_LOCATION_LON = "longitude";
 
     public DatabaseHelper(@Nullable Context context) {
         super(context, DATABASE_NAME, null, DATABASE_VERSION);
@@ -67,8 +74,19 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 "FOREIGN KEY(" + COL_USER_ID_FK + ") REFERENCES " + TABLE_USERS + "(" + COL_USER_ID + "))";
         db.execSQL(createTripsTable);
 
+        createLocationsTable(db);
+
         // Insert default admin account
         insertDefaultAdmin(db);
+    }
+
+    private void createLocationsTable(SQLiteDatabase db) {
+        String createLocationsTable = "CREATE TABLE IF NOT EXISTS " + TABLE_LOCATIONS + " (" +
+                COL_LOCATION_ID + " INTEGER PRIMARY KEY AUTOINCREMENT, " +
+                COL_LOCATION_NAME + " TEXT UNIQUE, " +
+                COL_LOCATION_LAT + " REAL, " +
+                COL_LOCATION_LON + " REAL)";
+        db.execSQL(createLocationsTable);
     }
 
     private void insertDefaultAdmin(SQLiteDatabase db) {
@@ -84,9 +102,9 @@ public class DatabaseHelper extends SQLiteOpenHelper {
 
     @Override
     public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-        db.execSQL("DROP TABLE IF EXISTS " + TABLE_TRIPS);
-        db.execSQL("DROP TABLE IF EXISTS " + TABLE_USERS);
-        onCreate(db);
+        if (oldVersion < 4) {
+            createLocationsTable(db);
+        }
     }
 
     // User class
@@ -111,6 +129,133 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         public double distance;
         public double carbonSaved;
         public long date;
+    }
+
+    public static class LocationPlace {
+        public int id;
+        public String name;
+        public double latitude;
+        public double longitude;
+    }
+
+    public void ensureDefaultLocations(java.util.Map<String, double[]> defaultLocations) {
+        SQLiteDatabase db = this.getWritableDatabase();
+        createLocationsTable(db);
+
+        Cursor cursor = db.query(TABLE_LOCATIONS, new String[]{"COUNT(*)"},
+                null, null, null, null, null);
+        boolean hasLocations = false;
+        if (cursor != null && cursor.moveToFirst()) {
+            hasLocations = cursor.getInt(0) > 0;
+            cursor.close();
+        }
+        if (cursor != null) cursor.close();
+
+        db.beginTransaction();
+        try {
+            for (java.util.Map.Entry<String, double[]> entry : defaultLocations.entrySet()) {
+                double[] coordinates = entry.getValue();
+                if (coordinates == null || coordinates.length < 2) {
+                    continue;
+                }
+                ContentValues values = new ContentValues();
+                values.put(COL_LOCATION_NAME, entry.getKey());
+                values.put(COL_LOCATION_LAT, coordinates[0]);
+                values.put(COL_LOCATION_LON, coordinates[1]);
+                db.insertWithOnConflict(TABLE_LOCATIONS, null, values, SQLiteDatabase.CONFLICT_IGNORE);
+            }
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+    }
+
+    public boolean updateUserName(int userId, String name) {
+        SQLiteDatabase db = this.getWritableDatabase();
+        ContentValues values = new ContentValues();
+        values.put(COL_USER_NAME, name);
+        int result = db.update(TABLE_USERS, values,
+                COL_USER_ID + "=?", new String[]{String.valueOf(userId)});
+        return result > 0;
+    }
+
+    public boolean updateUserPassword(int userId, String oldPassword, String newPassword) {
+        SQLiteDatabase db = this.getWritableDatabase();
+        Cursor cursor = db.query(TABLE_USERS, new String[]{COL_USER_PASSWORD},
+                COL_USER_ID + "=?", new String[]{String.valueOf(userId)},
+                null, null, null);
+
+        boolean matches = false;
+        if (cursor != null && cursor.moveToFirst()) {
+            matches = oldPassword.equals(cursor.getString(0));
+            cursor.close();
+        }
+        if (cursor != null) cursor.close();
+
+        if (!matches) {
+            return false;
+        }
+
+        ContentValues values = new ContentValues();
+        values.put(COL_USER_PASSWORD, newPassword);
+        int result = db.update(TABLE_USERS, values,
+                COL_USER_ID + "=?", new String[]{String.valueOf(userId)});
+        return result > 0;
+    }
+
+    public List<LocationPlace> getAllLocations() {
+        List<LocationPlace> locations = new ArrayList<>();
+        SQLiteDatabase db = this.getReadableDatabase();
+        createLocationsTable(db);
+
+        Cursor cursor = db.query(TABLE_LOCATIONS, null, null, null,
+                null, null, COL_LOCATION_NAME + " ASC");
+
+        if (cursor != null && cursor.moveToFirst()) {
+            do {
+                LocationPlace location = new LocationPlace();
+                location.id = cursor.getInt(cursor.getColumnIndexOrThrow(COL_LOCATION_ID));
+                location.name = cursor.getString(cursor.getColumnIndexOrThrow(COL_LOCATION_NAME));
+                location.latitude = cursor.getDouble(cursor.getColumnIndexOrThrow(COL_LOCATION_LAT));
+                location.longitude = cursor.getDouble(cursor.getColumnIndexOrThrow(COL_LOCATION_LON));
+                locations.add(location);
+            } while (cursor.moveToNext());
+            cursor.close();
+        }
+        return locations;
+    }
+
+    public boolean addLocation(String name, double latitude, double longitude) {
+        SQLiteDatabase db = this.getWritableDatabase();
+        createLocationsTable(db);
+
+        ContentValues values = new ContentValues();
+        values.put(COL_LOCATION_NAME, name);
+        values.put(COL_LOCATION_LAT, latitude);
+        values.put(COL_LOCATION_LON, longitude);
+        long result = db.insertWithOnConflict(TABLE_LOCATIONS, null, values, SQLiteDatabase.CONFLICT_ABORT);
+        return result != -1;
+    }
+
+    public boolean updateLocation(int id, String name, double latitude, double longitude) {
+        SQLiteDatabase db = this.getWritableDatabase();
+        createLocationsTable(db);
+
+        ContentValues values = new ContentValues();
+        values.put(COL_LOCATION_NAME, name);
+        values.put(COL_LOCATION_LAT, latitude);
+        values.put(COL_LOCATION_LON, longitude);
+        int result = db.update(TABLE_LOCATIONS, values,
+                COL_LOCATION_ID + "=?", new String[]{String.valueOf(id)});
+        return result > 0;
+    }
+
+    public boolean deleteLocation(int id) {
+        SQLiteDatabase db = this.getWritableDatabase();
+        createLocationsTable(db);
+        int result = db.delete(TABLE_LOCATIONS,
+                COL_LOCATION_ID + "=?", new String[]{String.valueOf(id)});
+        return result > 0;
     }
 
     // Check if email already exists
@@ -358,6 +503,11 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     // Save trip with user stats update
     public boolean saveTrip(int userId, String userName, String from, String to,
                             String mode, double distance, double carbonSaved) {
+        return saveTrip(userId, userName, from, to, mode, distance, carbonSaved, 1);
+    }
+
+    public boolean saveTrip(int userId, String userName, String from, String to,
+                            String mode, double distance, double carbonSaved, int tripsAdded) {
         SQLiteDatabase db = this.getWritableDatabase();
         db.beginTransaction();
 
@@ -376,8 +526,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             long result = db.insert(TABLE_TRIPS, null, values);
 
             if (result != -1) {
-                // Update user stats
-                updateUserStats(userId, carbonSaved, 1);
+                updateUserStats(db, userId, carbonSaved, tripsAdded);
                 db.setTransactionSuccessful();
                 return true;
             }
@@ -393,7 +542,10 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     // Update user statistics
     public void updateUserStats(int userId, double carbonSaved, int tripsAdded) {
         SQLiteDatabase db = this.getWritableDatabase();
+        updateUserStats(db, userId, carbonSaved, tripsAdded);
+    }
 
+    private void updateUserStats(SQLiteDatabase db, int userId, double carbonSaved, int tripsAdded) {
         Cursor cursor = db.query(TABLE_USERS, new String[]{COL_TOTAL_CARBON, COL_TOTAL_TRIPS},
                 COL_USER_ID + "=?", new String[]{String.valueOf(userId)}, null, null, null);
 

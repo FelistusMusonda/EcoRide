@@ -10,11 +10,16 @@ import androidx.appcompat.app.ActionBarDrawerToggle;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.Toolbar;
 import androidx.drawerlayout.widget.DrawerLayout;
+import androidx.core.app.NotificationManagerCompat;
 import androidx.fragment.app.Fragment;
 import com.google.android.material.bottomnavigation.BottomNavigationView;
 import com.google.android.material.navigation.NavigationView;
+import java.util.List;
+import java.util.Locale;
 
 public class MainActivity extends AppCompatActivity {
+
+    private static final int RETURN_NOTIFICATION_ID = 1042;
 
     private DrawerLayout drawerLayout;
     private BottomNavigationView bottomNavigationView;
@@ -27,6 +32,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+        NotificationManagerCompat.from(this).cancel(RETURN_NOTIFICATION_ID);
 
         sharedPreferences = getSharedPreferences("EcoRide", MODE_PRIVATE);
         databaseHelper = new DatabaseHelper(this);
@@ -122,6 +128,14 @@ public class MainActivity extends AppCompatActivity {
             } else if (id == R.id.nav_route) {
                 bottomNavigationView.setSelectedItemId(R.id.navigation_route);
                 drawerLayout.closeDrawers();
+            } else if (id == R.id.nav_recommendations) {
+                getSupportFragmentManager().beginTransaction()
+                        .replace(R.id.fragment_container, new RecommendationsFragment())
+                        .commit();
+                if (getSupportActionBar() != null) {
+                    getSupportActionBar().setTitle("Recommendations");
+                }
+                drawerLayout.closeDrawers();
             } else if (id == R.id.nav_carbon) {
                 bottomNavigationView.setSelectedItemId(R.id.navigation_carbon);
                 drawerLayout.closeDrawers();
@@ -165,9 +179,9 @@ public class MainActivity extends AppCompatActivity {
                 SharedPreferences.Editor editor = sharedPreferences.edit();
                 editor.putString("userName", user.name);
                 editor.putString("userEmail", user.email);
-                editor.putFloat("total_carbon", (float) user.totalCarbon);
-                editor.putInt("total_trips", user.totalTrips);
                 editor.apply();
+
+                syncTripPreferencesFromDatabase(userId);
             } else {
                 userName = sharedPreferences.getString("userName", "Guest");
                 userEmail = sharedPreferences.getString("userEmail", "guest@ecoride.com");
@@ -176,6 +190,120 @@ public class MainActivity extends AppCompatActivity {
             userName = sharedPreferences.getString("userName", "Guest");
             userEmail = sharedPreferences.getString("userEmail", "guest@ecoride.com");
         }
+    }
+
+    private void syncTripPreferencesFromDatabase(int userId) {
+        List<DatabaseHelper.Trip> trips = databaseHelper.getUserTrips(userId);
+        if (trips.isEmpty()) {
+            importPreferenceTripsToDatabase(userId);
+            trips = databaseHelper.getUserTrips(userId);
+        }
+
+        int totalTrips = 0;
+        float totalDistance = 0;
+        float totalCarbon = 0;
+
+        int walkingCount = 0;
+        int cyclingCount = 0;
+        int publicCount = 0;
+
+        float walkingDistance = 0;
+        float cyclingDistance = 0;
+        float publicDistance = 0;
+
+        float walkingCarbon = 0;
+        float cyclingCarbon = 0;
+        float publicCarbon = 0;
+
+        StringBuilder recentTrips = new StringBuilder();
+
+        for (int i = trips.size() - 1; i >= 0; i--) {
+            DatabaseHelper.Trip trip = trips.get(i);
+            int tripCount = getTripCountFromMode(trip.mode);
+            String modeLower = trip.mode == null ? "" : trip.mode.toLowerCase(Locale.US);
+
+            totalTrips += tripCount;
+            totalDistance += (float) trip.distance;
+            totalCarbon += (float) trip.carbonSaved;
+
+            if (modeLower.contains("walking")) {
+                walkingCount += tripCount;
+                walkingDistance += (float) trip.distance;
+                walkingCarbon += (float) trip.carbonSaved;
+            } else if (modeLower.contains("cycling")) {
+                cyclingCount += tripCount;
+                cyclingDistance += (float) trip.distance;
+                cyclingCarbon += (float) trip.carbonSaved;
+            } else if (modeLower.contains("bus")) {
+                publicCount += tripCount;
+                publicDistance += (float) trip.distance;
+                publicCarbon += (float) trip.carbonSaved;
+            }
+
+            if (recentTrips.length() > 0) {
+                recentTrips.append("||");
+            }
+            recentTrips.append(trip.from).append("|")
+                    .append(trip.to).append("|")
+                    .append(trip.mode).append("|")
+                    .append(trip.distance).append("|")
+                    .append(trip.carbonSaved);
+        }
+
+        sharedPreferences.edit()
+                .putInt("total_trips", totalTrips)
+                .putFloat("total_distance", totalDistance)
+                .putFloat("total_carbon", totalCarbon)
+                .putInt("walks_count", walkingCount)
+                .putInt("cycles_count", cyclingCount)
+                .putInt("public_count", publicCount)
+                .putFloat("walking_distance", walkingDistance)
+                .putFloat("cycling_distance", cyclingDistance)
+                .putFloat("public_distance", publicDistance)
+                .putFloat("walking_carbon", walkingCarbon)
+                .putFloat("cycling_carbon", cyclingCarbon)
+                .putFloat("public_carbon", publicCarbon)
+                .putString("recent_trips", recentTrips.toString())
+                .apply();
+    }
+
+    private void importPreferenceTripsToDatabase(int userId) {
+        String tripsData = sharedPreferences.getString("recent_trips", "");
+        if (tripsData == null || tripsData.isEmpty()) {
+            return;
+        }
+
+        String savedUserName = sharedPreferences.getString("userName", "User");
+        String[] tripRecords = tripsData.split("\\|\\|");
+        for (String tripRecord : tripRecords) {
+            String[] parts = tripRecord.split("\\|");
+            if (parts.length < 5) {
+                continue;
+            }
+
+            try {
+                String from = parts[0];
+                String to = parts[1];
+                String mode = parts[2];
+                double distance = Double.parseDouble(parts[3]);
+                double carbon = Double.parseDouble(parts[4]);
+                databaseHelper.saveTrip(
+                        userId,
+                        savedUserName,
+                        from,
+                        to,
+                        mode,
+                        distance,
+                        carbon,
+                        getTripCountFromMode(mode)
+                );
+            } catch (NumberFormatException ignored) {
+            }
+        }
+    }
+
+    private int getTripCountFromMode(String mode) {
+        return mode != null && mode.toLowerCase(Locale.US).contains("round trip") ? 2 : 1;
     }
 
     private void logout() {
@@ -194,6 +322,19 @@ public class MainActivity extends AppCompatActivity {
     protected void onResume() {
         super.onResume();
         refreshUserData();
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        NotificationManagerCompat.from(this).cancel(RETURN_NOTIFICATION_ID);
+        if (bottomNavigationView != null) {
+            bottomNavigationView.setSelectedItemId(R.id.navigation_home);
+        }
+        if (getSupportActionBar() != null) {
+            getSupportActionBar().setTitle("EcoRide");
+        }
     }
 
     @Override

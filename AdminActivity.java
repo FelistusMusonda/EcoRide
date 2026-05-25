@@ -2,24 +2,34 @@ package com.example.ecoride;
 
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.net.Uri;
 import android.os.Bundle;
+import android.provider.MediaStore;
 import android.view.Menu;
 import android.view.MenuItem;
-import android.widget.Button;
+import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
 import androidx.annotation.NonNull;
+import androidx.appcompat.app.ActionBarDrawerToggle;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.widget.Toolbar;
+import androidx.drawerlayout.widget.DrawerLayout;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
+import com.google.android.material.navigation.NavigationView;
 import java.util.List;
 
 public class AdminActivity extends AppCompatActivity {
 
+    private static final int PICK_ADMIN_IMAGE_REQUEST = 5201;
+
     private RecyclerView rvUsers;
     private TextView tvTotalUsers, tvTotalTrips, tvTotalCarbon, tvWelcomeAdmin;
-    private Button btnLogout, btnRefresh;
+    private ImageView imgAdminProfilePicture, imgAdminNavProfilePicture;
+    private DrawerLayout adminDrawerLayout;
+    private NavigationView adminNavView;
     private DatabaseHelper databaseHelper;
     private UserAdapter userAdapter;
     private SharedPreferences sharedPreferences;
@@ -43,8 +53,21 @@ public class AdminActivity extends AppCompatActivity {
             tvTotalTrips = findViewById(R.id.tv_total_trips);
             tvTotalCarbon = findViewById(R.id.tv_total_carbon);
             tvWelcomeAdmin = findViewById(R.id.tv_welcome_admin);
-            btnLogout = findViewById(R.id.btn_logout);
-            btnRefresh = findViewById(R.id.btn_refresh);
+            imgAdminProfilePicture = findViewById(R.id.img_admin_profile_picture);
+            adminDrawerLayout = findViewById(R.id.admin_drawer_layout);
+            adminNavView = findViewById(R.id.admin_nav_view);
+            Toolbar toolbar = findViewById(R.id.admin_toolbar);
+            setSupportActionBar(toolbar);
+
+            ActionBarDrawerToggle toggle = new ActionBarDrawerToggle(
+                    this,
+                    adminDrawerLayout,
+                    toolbar,
+                    R.string.open_drawer,
+                    R.string.close_drawer
+            );
+            adminDrawerLayout.addDrawerListener(toggle);
+            toggle.syncState();
 
             databaseHelper = new DatabaseHelper(this);
             sharedPreferences = getSharedPreferences("EcoRide", MODE_PRIVATE);
@@ -60,12 +83,14 @@ public class AdminActivity extends AppCompatActivity {
 
             // Get admin name
             String adminName = sharedPreferences.getString("userName", "Admin");
-            tvWelcomeAdmin.setText("Welcome, " + adminName);
+            tvWelcomeAdmin.setText("Registered Users");
+            TextView navName = adminNavView.getHeaderView(0).findViewById(R.id.tv_admin_nav_name);
+            imgAdminNavProfilePicture = adminNavView.getHeaderView(0).findViewById(R.id.img_admin_nav_profile);
+            navName.setText(adminName);
+            loadAdminProfilePicture();
 
             loadAdminData();
-
-            btnLogout.setOnClickListener(v -> logout());
-            btnRefresh.setOnClickListener(v -> loadAdminData());
+            setupAdminDrawer();
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -110,6 +135,108 @@ public class AdminActivity extends AppCompatActivity {
         } catch (Exception e) {
             e.printStackTrace();
             Toast.makeText(this, "Error loading data: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void setupAdminDrawer() {
+        adminNavView.setCheckedItem(R.id.admin_nav_users);
+        adminNavView.setNavigationItemSelectedListener(item -> {
+            int id = item.getItemId();
+            if (id == R.id.admin_nav_users) {
+                loadAdminData();
+            } else if (id == R.id.admin_nav_locations) {
+                startActivity(new Intent(AdminActivity.this, ManageLocationsActivity.class));
+            } else if (id == R.id.admin_nav_password) {
+                showChangePasswordDialog();
+            } else if (id == R.id.admin_nav_picture) {
+                pickAdminProfilePicture();
+            } else if (id == R.id.admin_nav_logout) {
+                logout();
+            }
+
+            adminDrawerLayout.closeDrawers();
+            return true;
+        });
+    }
+
+    private void loadAdminProfilePicture() {
+        String uriString = sharedPreferences.getString(getAdminProfilePictureKey(), "");
+        if (!uriString.isEmpty()) {
+            imgAdminProfilePicture.setPadding(0, 0, 0, 0);
+            imgAdminProfilePicture.setImageURI(Uri.parse(uriString));
+            if (imgAdminNavProfilePicture != null) {
+                imgAdminNavProfilePicture.setPadding(0, 0, 0, 0);
+                imgAdminNavProfilePicture.setImageURI(Uri.parse(uriString));
+            }
+        }
+    }
+
+    private String getAdminProfilePictureKey() {
+        return "profile_picture_" + sharedPreferences.getInt("userId", -1);
+    }
+
+    private void showChangePasswordDialog() {
+        android.view.View layout = getLayoutInflater().inflate(R.layout.dialog_change_password, null);
+        android.widget.EditText oldPassword = layout.findViewById(R.id.et_current_password);
+        android.widget.EditText newPassword = layout.findViewById(R.id.et_new_password);
+        android.widget.EditText confirmPassword = layout.findViewById(R.id.et_confirm_password);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Change Password")
+                .setView(layout)
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Save", (dialog, which) -> {
+                    String oldValue = oldPassword.getText().toString();
+                    String newValue = newPassword.getText().toString();
+                    String confirmValue = confirmPassword.getText().toString();
+
+                    if (newValue.length() < 4) {
+                        Toast.makeText(this, "Password must be at least 4 characters.", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    if (!newValue.equals(confirmValue)) {
+                        Toast.makeText(this, "Passwords do not match.", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+
+                    boolean updated = databaseHelper.updateUserPassword(
+                            sharedPreferences.getInt("userId", -1),
+                            oldValue,
+                            newValue
+                    );
+                    Toast.makeText(this,
+                            updated ? "Password updated." : "Current password is incorrect.",
+                            Toast.LENGTH_SHORT).show();
+                })
+                .show();
+    }
+
+    private void pickAdminProfilePicture() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT, MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("image/*");
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        startActivityForResult(intent, PICK_ADMIN_IMAGE_REQUEST);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == PICK_ADMIN_IMAGE_REQUEST && resultCode == RESULT_OK && data != null) {
+            Uri imageUri = data.getData();
+            if (imageUri != null) {
+                getContentResolver().takePersistableUriPermission(
+                        imageUri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION
+                );
+                sharedPreferences.edit().putString(getAdminProfilePictureKey(), imageUri.toString()).apply();
+                imgAdminProfilePicture.setPadding(0, 0, 0, 0);
+                imgAdminProfilePicture.setImageURI(imageUri);
+                if (imgAdminNavProfilePicture != null) {
+                    imgAdminNavProfilePicture.setPadding(0, 0, 0, 0);
+                    imgAdminNavProfilePicture.setImageURI(imageUri);
+                }
+            }
         }
     }
 
@@ -189,8 +316,7 @@ public class AdminActivity extends AppCompatActivity {
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
-        getMenuInflater().inflate(R.menu.admin_menu, menu);
-        return true;
+        return false;
     }
 
     @Override
@@ -204,6 +330,9 @@ public class AdminActivity extends AppCompatActivity {
             return true;
         } else if (id == R.id.menu_statistics) {
             viewStatistics();
+            return true;
+        } else if (id == R.id.menu_locations) {
+            startActivity(new Intent(AdminActivity.this, ManageLocationsActivity.class));
             return true;
         }
         return super.onOptionsItemSelected(item);
